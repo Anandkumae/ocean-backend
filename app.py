@@ -43,20 +43,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS with specific origins
-origins = [
-    "http://localhost:5173",  # Vite dev server
-    "http://127.0.0.1:5173",  # Alternative localhost
-    "http://localhost:8000",  # For direct API access
-]
-
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "https://ocean-frontend-jer9vzayj-anands-projects-6725bf98.vercel.app",
+        "https://ocean-frontend.vercel.app",
+        "http://localhost:5173"  # For local development
+    ],
+    allow_origin_regex=r"https://ocean-frontend-.*-anands-projects-.*.vercel.app",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["Content-Disposition"],
+    max_age=600,  # Cache preflight request for 10 minutes
 )
 
 def load_data():
@@ -133,10 +133,17 @@ if data is not None and 'date' in data.columns:
 
 # OpenRouter API configuration
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
+# Get the directory of the current script
+current_dir = Path(__file__).parent
+
 # Load environment variables from .env file
-load_dotenv()
+env_path = current_dir / '.env'
+load_dotenv(env_path)
+print(f"Loading environment variables from: {env_path}")
+print(f"OPENROUTER_API_KEY exists: {os.getenv('OPENROUTER_API_KEY') is not None}")
 
 # Get API key from environment variable
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -144,7 +151,12 @@ API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "deepseek/deepseek-chat"  # you can also try deepseek-coder, etc.
 
 @app.get("/ask")
-def ask(question: str):
+@app.options("/ask", include_in_schema=False)
+async def options_ask():
+    return {"message": "OK"}
+
+@app.get("/ask")
+async def ask(question: str):
     """
     Ask a question to the ocean data assistant using OpenRouter's API.
     
