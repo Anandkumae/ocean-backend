@@ -37,6 +37,11 @@ if API_KEY:
     print(f"API Key length: {len(API_KEY)} characters")
     print(f"API Key starts with: {API_KEY[:5]}...")
     print(f"API Key ends with: ...{API_KEY[-5:]}")
+    
+    # Validate API key format
+    if not API_KEY.startswith('sk-or-v1-'):
+        print("\n!!! WARNING: Invalid OpenRouter API key format !!!")
+        print("API key should start with 'sk-or-v1-'. Please check your API key in the OpenRouter dashboard.")
 else:
     print("\n!!! WARNING: OPENROUTER_API_KEY not found in environment variables !!!")
     print("Please make sure your .env file is in the correct location and contains the OPENROUTER_API_KEY")
@@ -301,6 +306,12 @@ async def ask_question(question_text: str):
                     if 'error' in error_json:
                         if isinstance(error_json['error'], dict):
                             error_detail = error_json['error'].get('message', str(error_json['error']))
+                            
+                            # Add specific handling for authentication errors
+                            if e.response.status_code == 401:
+                                error_detail = "Authentication failed. Please check your OpenRouter API key. " \
+                                             "Make sure it's correct and hasn't been revoked. " \
+                                             f"Key format should be: sk-or-v1-... (received: {API_KEY[:10]}...)"
                         else:
                             error_detail = str(error_json['error'])
                     else:
@@ -310,6 +321,15 @@ async def ask_question(question_text: str):
             except Exception as inner_e:
                 print(f"Error processing response: {str(inner_e)}")
         
+        # Provide more helpful error messages based on status code
+        if hasattr(e, 'response') and e.response is not None:
+            if e.response.status_code == 401:
+                error_detail = "Authentication failed. Please check your OpenRouter API key. " \
+                             "Make sure it's correct and hasn't been revoked. " \
+                             f"Key format should be: sk-or-v1-... (received: {API_KEY[:10]}...)"
+            elif e.response.status_code == 429:
+                error_detail = "Rate limit exceeded. Please check your OpenRouter plan limits."
+        
         raise HTTPException(
             status_code=500,
             detail={
@@ -317,9 +337,10 @@ async def ask_question(question_text: str):
                 "details": error_detail,
                 "debug": {
                     "api_key_exists": bool(API_KEY),
+                    "api_key_starts_with": API_KEY[:10] if API_KEY else None,
                     "api_key_length": len(API_KEY) if API_KEY else 0,
                     "request_url": API_URL,
-                    "response": response_info
+                    "response_status": e.response.status_code if hasattr(e, 'response') and e.response else None
                 }
             }
         )
