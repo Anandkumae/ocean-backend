@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 import pandas as pd
@@ -10,6 +10,44 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel
+from dotenv import load_dotenv
+from pathlib import Path
+
+# OpenRouter API Configuration
+API_URL = "https://openrouter.ai/api/v1/chat/completions"
+MODEL = "meta-llama/llama-3-70b-instruct"  # Using Llama 3 model through OpenRouter
+
+# Debug: Print current directory and environment
+print("\n=== Debug Information ===")
+print("Current working directory:", os.getcwd())
+print("Files in directory:", os.listdir('.'))
+print("Environment variables:", {k: '***' if 'KEY' in k else v for k, v in os.environ.items() if 'API' in k or 'KEY' in k})
+
+# Load environment variables
+current_dir = Path(__file__).parent
+env_path = current_dir / '.env'
+print(f"\nLoading environment variables from: {env_path}")
+print(f"File exists: {env_path.exists()}")
+load_dotenv(env_path, override=True)
+
+# Get the API key
+API_KEY = os.getenv("OPENROUTER_API_KEY")
+print(f"OPENROUTER_API_KEY loaded: {API_KEY is not None}")
+if API_KEY:
+    print(f"API Key length: {len(API_KEY)} characters")
+    print(f"API Key starts with: {API_KEY[:5]}...")
+    print(f"API Key ends with: ...{API_KEY[-5:]}")
+else:
+    print("\n!!! WARNING: OPENROUTER_API_KEY not found in environment variables !!!")
+    print("Please make sure your .env file is in the correct location and contains the OPENROUTER_API_KEY")
+
+# Set up headers for API requests
+HEADERS = {
+    "Authorization": f"Bearer {API_KEY}",
+    "HTTP-Referer": "https://github.com/Anandkumae/Argo_Ocean",
+    "X-Title": "Ocean Agro",
+    "Content-Type": "application/json"
+}
 
 # Global variable to store the data
 data = None
@@ -47,11 +85,10 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
-    expose_headers=["*"],  # Expose all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Add middleware to handle CORS headers and preflight requests
@@ -151,86 +188,128 @@ data = load_data()
 if data is not None and 'date' in data.columns:
     data['date'] = pd.to_datetime(data['date'], errors='coerce')
 
-# OpenRouter API configuration
-import os
-from pathlib import Path
-from dotenv import load_dotenv
 
-# Get the directory of the current script
-current_dir = Path(__file__).parent
+class Question(BaseModel):
+    question: str
 
-# Load environment variables from .env file
-env_path = current_dir / '.env'
-load_dotenv(env_path)
-print(f"Loading environment variables from: {env_path}")
-print(f"OPENROUTER_API_KEY exists: {os.getenv('OPENROUTER_API_KEY') is not None}")
-
-# Get API key from environment variable
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "deepseek/deepseek-chat"  # you can also try deepseek-coder, etc.
-
-@app.get("/ask")
-@app.options("/ask", include_in_schema=False)
-async def options_ask():
-    return {"message": "OK"}
-
-@app.get("/ask")
-async def ask(question: str):
+@app.post("/ask")
+async def ask(question_data: Question):
     """
-    Ask a question to the ocean data assistant using OpenRouter's API.
+    Handle POST requests to the /ask endpoint.
+    """
+    if not question_data:
+        raise HTTPException(status_code=400, detail="Question data is required")
     
-    Args:
-        question (str): The question to ask the assistant
-        
-    Returns:
-        dict: Contains the assistant's answer or an error message
-    """
+    # Check if API key is available
     if not API_KEY:
-        raise HTTPException(
-            status_code=400,
-            detail="OpenRouter API key is not configured. Please set the OPENROUTER_API_KEY environment variable in a .env file"
-        )
-        
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": "You are an ocean data assistant. Answer questions about oceanography, marine life, and related topics clearly and concisely."},
-            {"role": "user", "content": question}
-        ]
-    }
-
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        result = response.json()
-        
-        try:
-            return {
-                "status": "success",
-                "answer": result["choices"][0]["message"]["content"]
-            }
-        except (KeyError, IndexError) as e:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "Failed to parse API response",
-                    "details": str(e),
-                    "response": result
-                }
-            )
-            
-    except requests.exceptions.RequestException as e:
         raise HTTPException(
             status_code=500,
             detail={
-                "error": "Failed to communicate with OpenRouter API",
-                "details": str(e)
+                "error": "Configuration Error",
+                "details": "OpenRouter API key is not configured in environment variables"
+            }
+        )
+    
+    print(f"Using OpenRouter API key: {API_KEY[:5]}...{API_KEY[-5:]}")
+    
+    try:
+        # Prepare the request payload for OpenRouter
+        payload = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": "You are an ocean data assistant. Answer questions about oceanography, marine life, and related topics clearly and concisely."},
+                {"role": "user", "content": question_data.question}
+            ]
+        }
+        
+        # Add additional parameters to the payload
+        payload.update({
+            "max_tokens": 1000,
+            "top_p": 1,
+            "frequency_penalty": 0,
+            "presence_penalty": 0
+        })
+        
+        print("\n=== Sending request to OpenRouter API ===")
+        print(f"API URL: {API_URL}")
+        print(f"Model: {MODEL}")
+        print(f"Headers: { {k: '***' if k.lower() == 'authorization' else v for k, v in HEADERS.items()} }")
+        
+        # Print debug info
+        print("\n=== Debug Information ===")
+        print(f"1. Current working directory: {os.getcwd()}")
+        print(f"2. Environment variables loaded: {os.getenv('OPENROUTER_API_KEY') is not None}")
+        print(f"3. API_URL being used: {API_URL}")
+        print(f"4. MODEL being used: {MODEL}")
+        print(f"5. Headers being sent: { {k: '***' if k.lower() == 'authorization' else v for k, v in HEADERS.items()} }")
+        
+        # Make the API call to OpenRouter
+        print("\n=== Sending request to OpenRouter API ===")
+        response = requests.post(
+            API_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=30  # 30 seconds timeout
+        )
+        
+        # Print response info
+        print("\n=== Received response ===")
+        print(f"Status code: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        print(f"Response content: {response.text[:500]}")
+        
+        response.raise_for_status()  # This will raise an exception for 4XX/5XX responses
+        
+        # Extract the response content
+        result = response.json()
+        if 'choices' in result and len(result['choices']) > 0:
+            answer = result['choices'][0]['message']['content']
+            return {"answer": answer}
+        else:
+            raise ValueError("Unexpected response format from OpenRouter API")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"\n=== Error Details ===")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        
+        error_detail = str(e)
+        response_info = {}
+        
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                response_info = {
+                    "status_code": e.response.status_code,
+                    "headers": dict(e.response.headers),
+                    "body": e.response.text
+                }
+                print(f"Response info: {response_info}")
+                
+                try:
+                    error_json = e.response.json()
+                    if 'error' in error_json:
+                        if isinstance(error_json['error'], dict):
+                            error_detail = error_json['error'].get('message', str(error_json['error']))
+                        else:
+                            error_detail = str(error_json['error'])
+                    else:
+                        error_detail = str(error_json)
+                except:
+                    error_detail = e.response.text or str(e)
+            except Exception as inner_e:
+                print(f"Error processing response: {str(inner_e)}")
+                
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to process your request with OpenRouter API",
+                "details": error_detail,
+                "debug": {
+                    "api_key_exists": bool(API_KEY),
+                    "api_key_length": len(API_KEY) if API_KEY else 0,
+                    "request_url": API_URL,
+                    "response": response_info
+                }
             }
         )
 
