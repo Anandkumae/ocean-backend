@@ -192,13 +192,32 @@ if data is not None and 'date' in data.columns:
 class Question(BaseModel):
     question: str
 
+class QuestionQuery(BaseModel):
+    question: str
+
+@app.get("/ask")
+async def ask_get(question: str):
+    """
+    Handle GET requests to the /ask endpoint.
+    Example: /ask?question=What is oceanography?
+    """
+    return await ask_question(question)
+
 @app.post("/ask")
-async def ask(question_data: Question):
+async def ask_post(question_data: Question):
     """
     Handle POST requests to the /ask endpoint.
     """
-    if not question_data:
-        raise HTTPException(status_code=400, detail="Question data is required")
+    if not question_data or not question_data.question:
+        raise HTTPException(status_code=400, detail="Question is required")
+    return await ask_question(question_data.question)
+
+async def ask_question(question_text: str):
+    """
+    Common function to handle the question processing.
+    """
+    if not question_text:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
     
     # Check if API key is available
     if not API_KEY:
@@ -218,7 +237,7 @@ async def ask(question_data: Question):
             "model": MODEL,
             "messages": [
                 {"role": "system", "content": "You are an ocean data assistant. Answer questions about oceanography, marine life, and related topics clearly and concisely."},
-                {"role": "user", "content": question_data.question}
+                {"role": "user", "content": question_text}
             ]
         }
         
@@ -230,21 +249,13 @@ async def ask(question_data: Question):
             "presence_penalty": 0
         })
         
+        # Print debug info
         print("\n=== Sending request to OpenRouter API ===")
         print(f"API URL: {API_URL}")
         print(f"Model: {MODEL}")
         print(f"Headers: { {k: '***' if k.lower() == 'authorization' else v for k, v in HEADERS.items()} }")
         
-        # Print debug info
-        print("\n=== Debug Information ===")
-        print(f"1. Current working directory: {os.getcwd()}")
-        print(f"2. Environment variables loaded: {os.getenv('OPENROUTER_API_KEY') is not None}")
-        print(f"3. API_URL being used: {API_URL}")
-        print(f"4. MODEL being used: {MODEL}")
-        print(f"5. Headers being sent: { {k: '***' if k.lower() == 'authorization' else v for k, v in HEADERS.items()} }")
-        
         # Make the API call to OpenRouter
-        print("\n=== Sending request to OpenRouter API ===")
         response = requests.post(
             API_URL,
             headers=HEADERS,
@@ -298,7 +309,7 @@ async def ask(question_data: Question):
                     error_detail = e.response.text or str(e)
             except Exception as inner_e:
                 print(f"Error processing response: {str(inner_e)}")
-                
+        
         raise HTTPException(
             status_code=500,
             detail={
