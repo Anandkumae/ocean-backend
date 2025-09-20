@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 import pandas as pd
 import os
 import uvicorn
@@ -46,18 +47,37 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://ocean-frontend-jer9vzayj-anands-projects-6725bf98.vercel.app",
-        "https://ocean-frontend.vercel.app",
-        "http://localhost:5173"  # For local development
-    ],
-    allow_origin_regex=r"https://ocean-frontend-.*-anands-projects-.*.vercel.app",
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
-    expose_headers=["Content-Disposition"],
-    max_age=600,  # Cache preflight request for 10 minutes
+    expose_headers=["*"],  # Expose all headers
 )
+
+# Add middleware to handle CORS headers and preflight requests
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    # Handle preflight requests
+    if request.method == "OPTIONS":
+        response = Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Max-Age": "600"  # 10 minutes
+            }
+        )
+    else:
+        # Process the request and add CORS headers to the response
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 
 def load_data():
     """Load the data from CSV file"""
